@@ -1,13 +1,14 @@
 (ns oly.constraints)
 
-; number is final value
-; keyword is final value
-; set is individual elements
-; vector [a b] is (range a (inc b))
-; list ([a b] [c d]) is an ordered, disjoint set of a-b ranges (as in vector)
+;; number is final value
+;; string is a final value
+;; symbol is final value
+;; set is individual elements
+;; vector [a b] is (range a (inc b))
+;; list ([a b] [c d]) is an ordered, disjoint set of a-b ranges (as in vector)
 
-; dom is map of variable (as keyword) to above domain type
-
+;; dom is map of variable (as keyword) to above domain type
+;; props is a collection (set? vector?) of propagators
 
 (defn make-CSP 
   "Simple CSP constructor"
@@ -24,7 +25,8 @@
   [dom v]
   (let [vval (v dom)]
     (or (number? vval)
-        (keyword? vval))))
+        (string? vval)
+        (symbol? vval))))
 
 (defn domain-solved?
   "Returns true if all the variables have been assigned a final value,
