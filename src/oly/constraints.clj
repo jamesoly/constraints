@@ -66,9 +66,17 @@ valid domain assignments."
       (domain-solved? new-c) (list new-c)
       :else (mapcat solve (split-constraints new-c)))))
 
+	  
 
 
+(def order #{1 2 3 4})
+(def arch-domain (zipmap [:espadrilles :flats :pumps :sandals
+							:foot-farm :heels-handcart :shoe-palace :tootsies]
+						(repeat order)))
 
+#_(def arch-prop (prop-add (all-different [:espadrilles :flats :pumps :sandals])
+						(all-different [:foot-farm :heels-handcart :shoe-palace :tootsies])))
+						
 #_(defn prob1 []
   (let [d {:x #{1 2} :y #{2 3}}
         p #{(prop= 4 (prop+ :x :y))}]
