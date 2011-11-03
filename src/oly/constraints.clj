@@ -20,30 +20,35 @@
   [{:keys [dom props] :as c}]
   c)
 
-(defn ground?
-  "Returns true if the given variable has a final value in the given domain."
-  [dom v]
-  (let [vval (v dom)]
-    (or (number? vval)
-        (string? vval)
-        (symbol? vval))))
+; Is the type a ground (fully-assigned) type?
+(defmulti ground? class)
+(defmethod ground? :default [_] false)
+(defmethod ground? java.lang.Long [_] true)
+(defmethod ground? java.lang.String [_] true)
+(defmethod ground? clojure.lang.Symbol [_] true)
+
+; Does this domain include i as a member?
+(defmulti member? (fn [d i] (class d)))
+(defmethod member? clojure.lang.PersistentHashSet [d i] (d i))
 
 (defn domain-solved?
   "Returns true if all the variables have been assigned a final value,
 or if the propagators have been exhausted."
   [{:keys [dom props]}]
   (or (empty? props)
-      (every? (partial ground? dom) dom)))
+      (every? #(ground? (val %)) dom)))
 
-(defn choose-val
-  "Pick one item from a domain entry"
-  [vs]
-  2)
+; Choose an arbitrary member from a domain type. Used to split CSPs
+(defmulti choose-val class)
+(defmethod choose-val clojure.lang.PersistentHashSet
+  [a]
+  (first a))
 
-(defn remove-val
-  "Remove a value from a domain entry"
-  [vs v]
-  (dissoc vs 2))
+; Remove a member from a domain type
+(defmulti remove-val (fn [d _] (class d)))
+(defmethod remove-val clojure.lang.PersistentHashSet
+  [d i]
+  (disj d i))
 
 (defn split-constraints
   "Returns a seq of smaller CSPs. This version does a simple split by finding
@@ -51,7 +56,8 @@ a variable without a final value and returning two CSPs: one where the
 variable is assigned to one of the possible values, and another where that
 same value has been removed from the possible values of that same variable."
   [{:keys [dom props]}]
-  (let [[v vs] (first (remove #(not (ground? dom %2)) dom))
+  (println (str "split: " dom))
+  (let [[v vs] (first (filter #(not (ground? (val %))) dom))
         chosen (choose-val vs)]
     (list (make-CSP (assoc dom v chosen) props)
           (make-CSP (assoc dom v (remove-val vs chosen)) props))))
@@ -78,35 +84,34 @@ valid domain assignments."
 ; Events are a pair of a variable and an event indicator, such as
 ; :assigned (variable has been fully assigned), :domain-change
 ; (unspecified change), :lower-bound, :upper-bound, :both-bounds. They
-; are used to schedule interested propagators.
+; are used to schedule interested propagators. Note: currently these
+; events are just the variables, not the event indicator.
 
 (defn create-prop [f pri interest]
+  "Creates a propagator given a propagation function, priority, and
+   a vector of variables whose changes will trigger the propagator
+   to be rescheduled. This vector will eventually incorporate what
+   type of modification events will cause a reschedule."
   {:f f :priority pri :interests interest})
 
 (defn empty-prop-result [dom]
+  "Propagation function that can make no changes to the domains."
   [dom :subsumed []])
 (def empty-propagator (create-prop empty-prop-result 1 []))
 
 (defn null-prop-result [dom]
+  "Propagation function that results in failure."
   [nil :subsumed []])
 (def null-propagator (create-prop null-prop-result 1 []))
 
-(defmulti ground? class)
-(defmethod ground? :default [_] false)
-(defmethod ground? java.lang.Long [_] true)
-(defmethod ground? java.lang.String [_] true)
-(defmethod ground? clojure.lang.Symbol [_] true)
-
-(defmulti member? (fn [c i] (class c)))
-(defmethod member? clojure.lang.PersistentHashSet [c i] (c i))
-
+; Used by multimethods to choose propagator implementations
 (defn var-type
   "Returns :ground for ground types, :var for domain variables"
   [a]
   (if (ground? a) :ground :var))
 
+; Base constraint, equality
 (defmulti === (fn [a b] [(var-type a) (var-type b)]))
-(defmethod === :default [_ _] :invalid===)
 
 (defmethod === [:var :var]
   [a b]
@@ -174,6 +179,9 @@ valid domain assignments."
   [g v]
   (=== v g))
 
+
+;;;;;;;;
+
 (def p1 (=== :x :y))
 (def pp (:f p1))
 
@@ -206,7 +214,7 @@ valid domain assignments."
 
 (defn prob2 []
   (let [d {:x #{1 2 3} :y #{1 2 3}}
-        p #{(== x 1)}]
-    (solve-constraints (make-CSP d p))))
+        p #{(=== :x 1)}]
+    (solve (make-CSP d p))))
 
 
