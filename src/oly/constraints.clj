@@ -20,6 +20,24 @@
   [{:keys [dom props] :as c}]
   c)
 
+(def empty-prop-set
+  {:props #{} :index {}})
+(defn make-prop-set
+  ([] (make-prop-set #{} {}))
+  ([props index] {:props props :index index}))
+
+(defn add-propagator
+  "Add a propagator to the propagator set and index what variables
+   it is interested in."
+  ([prop]
+    (add-propagator (make-prop-set) prop))
+  ([{:keys [props index]} {:keys [f priority interests] :as prop}]
+    (make-prop-set
+      (conj props prop)
+      (merge-with clojure.set/union
+                  index
+                  (into {} (for [[v ev] interests] [v #{prop}]))))))    
+
 ; Is the type a ground (fully-assigned) type?
 (defmulti ground? class)
 (defmethod ground? :default [_] false)
@@ -163,7 +181,7 @@ valid domain assignments."
                :fix
                [[a :modified] [b :modified]]])))))
     1
-    [a b]))
+    [[a :modified] [b :modified]]))
 
 (defmethod === [:var :ground]
   [v g]
@@ -173,7 +191,7 @@ valid domain assignments."
         [(assoc dom v g) :subsumed [[v :assigned]]]
         (null-prop-result dom)))
     1
-    [v]))
+    [[v :modified]]))
 
 (defmethod === [:ground :var]
   [g v]
@@ -196,10 +214,10 @@ valid domain assignments."
     (prop-add
       (all-different [:espadrilles :flats :pumps :sandals])
       (all-different [:foot-farm :heels-handcart :shoe-palace :tootsies])
-      (== :flats :heels-handcart)
-      (not== (+ 1 :pumps) :tootsies)
-      (== :foot-farm 2)
-      (== (+ 2 :shoe-palace) :sandals)))
+      (=== :flats :heels-handcart)
+      (not=== (+ 1 :pumps) :tootsies)
+      (=== :foot-farm 2)
+      (=== (+ 2 :shoe-palace) :sandals)))
 
 
 
