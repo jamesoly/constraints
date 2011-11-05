@@ -40,11 +40,12 @@
 (defn make-queue
   "Make a PriorityQueue with space for an initial n propagators"
   [n]
-  (PriorityQueue. n (comparator #(< (:priority %1)
-                                    (:priority %2)))))
+  (PriorityQueue. (inc n) (comparator #(< (:priority %1)
+                                          (:priority %2)))))
 
 (def empty-prop-set
   {:props #{} :index {}})
+
 (defn make-prop-set
   ([] (make-prop-set #{} {}))
   ([props index] {:props props :index index}))
@@ -113,7 +114,7 @@
   "Returns true if all the variables have been assigned a final value,
 or if the propagators have been exhausted."
   [{:keys [dom propset]}]
-  (or (empty? propset)
+  (or (empty? (:props propset))
       (every? #(ground? (val %)) dom)))
 
 ; Choose an arbitrary member from a domain type. Used to split CSPs
@@ -126,7 +127,10 @@ or if the propagators have been exhausted."
 (defmulti remove-val (fn [d _] (class d)))
 (defmethod remove-val clojure.lang.PersistentHashSet
   [d i]
-  (disj d i))
+  (let [new-d (disj d i)]
+    (if (= 1 (count new-d))
+      (first new-d)
+      new-d)))
 
 (defn split-constraints
   "Returns a seq of smaller CSPs. This version does a simple split by finding
@@ -262,9 +266,54 @@ valid domain assignments."
   (=== v g))
 
 
-          
-          
+;;; Base negation type
+(defmulti not=== (fn [a b] [(var-type a) (var-type b)]))
 
+(defmethod not=== [:var :var]
+  [a b]
+  (create-prop
+    (fn [dom]
+      (let [da (dom a)
+            db (dom b)]
+        (cond
+          (and (ground? da) (ground? db))
+          (if (= da db)
+            (fail-result)
+            (subsumed-result dom))
+          
+          (ground? da)
+          (if (member? db da)
+            [(assoc dom b (remove-val db da)) :subsumed [[b :modified]]]
+            (subsumed-result dom))
+          
+          (ground? db)
+          (if (member? da db)
+            [(assoc dom a (remove-val da db)) :subsumed [[a :modified]]]
+            (subsumed-result dom))
+
+          :else
+          (if (empty? (clojure.set/intersection da db))
+            (subsumed-result dom)
+            (fixed-result dom)))))
+    1
+    [[a :modified] [b :modified]]))
+
+(defmethod not=== [:var :ground]
+  [v g]
+  (create-prop
+    (fn [dom]
+      (let [dv (dom v)]
+        (cond
+          (and (ground? dv) (= dv g)) (fail-result)
+          (ground? dv) (subsumed-result dom)
+          (member? dv g) [(assoc dom v (remove-val dv g)) :subsumed [[v :modified]]]
+          :else (fixed-result dom))))
+    1
+    [[v :modified]]))
+
+(defmethod not=== [:ground :var]
+  [g v]
+  (not=== v g))
 
 ;;;;;;;;
 
@@ -288,13 +337,19 @@ valid domain assignments."
 
 (def d1 {:x #{1 2} :y #{2 3}})
 (def d2 {:x 4 :y #{5 3}})
+(def d3 {:x #{1 2 3} :y #{1 2 3}})
 
 (defn prob1 []
   (solve (make-CSP d1 (add-all-props [(=== :x :y)]))))
 
 (defn prob2 []
-  (let [d {:x #{1 2 3} :y #{1 2 3}}
-        p (add-all-props [(=== :x :y)])]
-    (solve (make-CSP d p))))
+  (solve (make-CSP d3 (add-all-props [(=== :x :y)]))))
+
+(defn prob3 []
+  (solve (make-CSP d3 (add-all-props [(not=== :x :y) (not=== 2 :y)]))))
+
+(defn prob4 []
+  (solve (make-CSP {:x #{1 2}} empty-prop-set)))
+
 
 
