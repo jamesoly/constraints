@@ -1,4 +1,5 @@
-(ns oly.constraints)
+(ns oly.constraints
+  (:import [java.util PriorityQueue]))
 
 ;; number is final value
 ;; string is a final value
@@ -8,23 +9,76 @@
 ;; list ([a b] [c d]) is an ordered, disjoint set of a-b ranges (as in vector)
 
 ;; dom is map of variable (as keyword) to above domain type
-;; props is a collection (set? vector?) of propagators
+;; propset is a map of propagators and a propagator index
 
 (defn make-CSP 
   "Simple CSP constructor"
   [domains propagators]
-  {:dom domains :props propagators})
+  {:dom domains :propset propagators})
 
-(defn propagate
-  "Null propagation, does not apply propagators."
-  [{:keys [dom props] :as c}]
-  c)
+(defn add-if-not-present!
+  "Add an element to q! if not already present"
+  [q! e]
+  (when-not (.contains q! e)
+    (.add q! e)))
+
+(defn schedule!
+  "Schedule propagators into q! that are waiting on the given variables"
+  [propset q! vs]
+  (doseq [v vs
+          p (get-in propset [:index v])]
+    (add-if-not-present! q! p))
+  q!)
+
+(defn enqueue!
+  "Add a seq of propagators into the provided priority queue"
+  [q! c]
+  (doseq [p (get-in c [:propset :props])]
+    (add-if-not-present! q! p))
+  q!)
+
+(defn make-queue
+  "Make a PriorityQueue with space for an initial n propagators"
+  [n]
+  (PriorityQueue. n (comparator #(< (:priority %1)
+                                    (:priority %2)))))
 
 (def empty-prop-set
   {:props #{} :index {}})
 (defn make-prop-set
   ([] (make-prop-set #{} {}))
   ([props index] {:props props :index index}))
+
+(defn remove-prop
+  "Removes a propagator from a propset, including its index entry."
+  [{:keys [props index]} p]
+  (make-prop-set (disj props p)
+                 (let [affected (map first (:interests p))]
+                   (reduce #(assoc %1 %2 (disj (%2 %1) p)) index affected))))
+
+(defn propagate
+  "Propagate changes until we reach a fixed point"
+  ([c]
+    (propagate c (enqueue!
+                   (make-queue (count (get-in c [:propset :props])))
+                   c)))
+  ([{:keys [dom propset] :as c} q!]
+    (let [p (.poll q!)]
+      (if (nil? p)
+        c
+        (let [[new-dom result events] ((:f p) dom)
+              vs (map first events)]
+          (cond
+            (empty? new-dom) (make-CSP nil nil)
+            
+            (= :subsumed result)
+            (let [new-propset (remove-prop propset p)]
+              (recur (make-CSP new-dom new-propset)
+                     (schedule! new-propset q! vs)))
+        
+            (= :fix result) (recur (make-CSP new-dom propset) q!)))))))
+    
+    
 
 (defn add-propagator
   "Add a propagator to the propagator set and index what variables
@@ -36,7 +90,13 @@
       (conj props prop)
       (merge-with clojure.set/union
                   index
-                  (into {} (for [[v ev] interests] [v #{prop}]))))))    
+                  (into {} (for [[v ev] interests] [v #{prop}]))))))
+
+(defn add-all-props
+  ([ps]
+    (add-all-props (make-prop-set) ps))
+  ([propset ps]
+    (reduce add-propagator propset ps)))                          
 
 ; Is the type a ground (fully-assigned) type?
 (defmulti ground? class)
@@ -52,8 +112,8 @@
 (defn domain-solved?
   "Returns true if all the variables have been assigned a final value,
 or if the propagators have been exhausted."
-  [{:keys [dom props]}]
-  (or (empty? props)
+  [{:keys [dom propset]}]
+  (or (empty? propset)
       (every? #(ground? (val %)) dom)))
 
 ; Choose an arbitrary member from a domain type. Used to split CSPs
@@ -73,18 +133,18 @@ or if the propagators have been exhausted."
 a variable without a final value and returning two CSPs: one where the
 variable is assigned to one of the possible values, and another where that
 same value has been removed from the possible values of that same variable."
-  [{:keys [dom props]}]
+  [{:keys [dom propset]}]
   (println (str "split: " dom))
   (let [[v vs] (first (filter #(not (ground? (val %))) dom))
         chosen (choose-val vs)]
-    (list (make-CSP (assoc dom v chosen) props)
-          (make-CSP (assoc dom v (remove-val vs chosen)) props))))
+    (list (make-CSP (assoc dom v chosen) propset)
+          (make-CSP (assoc dom v (remove-val vs chosen)) propset))))
 
 (defn solve
   "Solve a constraint satisfaction (finite domain) problem. Returns a seq of
 valid domain assignments."
-  [{:keys [dom props] :as c}]
-  (let [{new-dom :dom new-props :props :as new-c} (propagate c)]
+  [{:keys [dom propset] :as c}]
+  (let [{new-dom :dom :as new-c} (propagate c)]
     (cond
       (nil? new-dom) nil
       (domain-solved? new-c) (list new-dom)
@@ -112,15 +172,17 @@ valid domain assignments."
    type of modification events will cause a reschedule."
   {:f f :priority pri :interests interest})
 
-(defn empty-prop-result [dom]
-  "Propagation function that can make no changes to the domains."
-  [dom :subsumed []])
-(def empty-propagator (create-prop empty-prop-result 1 []))
+(defn fixed-result [dom]
+  "Propagation result where propagator is at a fixed point"
+  [dom :fix []])
 
-(defn null-prop-result [dom]
+(defn subsumed-result [dom]
+  "Propagation result when a propagator has already been subsumed"
+  [dom :subsumed []])
+
+(defn fail-result []
   "Propagation function that results in failure."
   [nil :subsumed []])
-(def null-propagator (create-prop null-prop-result 1 []))
 
 ; Used by multimethods to choose propagator implementations
 (defn var-type
@@ -128,7 +190,7 @@ valid domain assignments."
   [a]
   (if (ground? a) :ground :var))
 
-; Base constraint, equality
+;;; Base constraint, equality
 (defmulti === (fn [a b] [(var-type a) (var-type b)]))
 
 (defmethod === [:var :var]
@@ -140,18 +202,18 @@ valid domain assignments."
         (cond
           (and (ground? da) (ground? db))
           (if (= da db)
-            (empty-prop-result dom)
-            (null-prop-result dom))
+            (subsumed-result dom)
+            (fail-result))
           
           (ground? da)
           (if (member? db da)
             [(assoc dom b da) :subsumed [[b :assigned]]]
-            (null-prop-result dom))
+            (fail-result))
           
           (ground? db)
           (if (member? da db)
             [(assoc dom a db) :subsumed [[a :assigned]]]
-            (null-prop-result dom))
+            (fail-result))
           
           :else
           (let [inter (clojure.set/intersection da db)
@@ -160,7 +222,7 @@ valid domain assignments."
                 cb (count db)]
             (cond
               (= cinter 0)
-              (null-prop-result dom)
+              (fail-result)
               
               (= cinter 1)
               [(into dom [[a (first inter)] [b (first inter)]])
@@ -168,7 +230,7 @@ valid domain assignments."
                [[a :assigned] [b :assigned]]]
               
               (and (= cinter ca) (= cinter cb))
-              (empty-prop-result dom)
+              (fixed-result dom)
               
               (= cinter ca)
               [(assoc dom b inter) :fix [b :modified]]
@@ -187,15 +249,21 @@ valid domain assignments."
   [v g]
   (create-prop
     (fn [dom]
-      (if ((dom v) g)
-        [(assoc dom v g) :subsumed [[v :assigned]]]
-        (null-prop-result dom)))
+      (let [dv (dom v)]
+        (if (or (and (ground? dv) (= dv g))
+                (member? dv g))
+            [(assoc dom v g) :subsumed [[v :assigned]]]
+            (fail-result))))
     1
     [[v :modified]]))
 
 (defmethod === [:ground :var]
   [g v]
   (=== v g))
+
+
+          
+          
 
 
 ;;;;;;;;
@@ -211,28 +279,22 @@ valid domain assignments."
                           :foot-farm :heels-handcart :shoe-palace :tootsies]
 		(repeat order)))
 #_(def arch-prop
-    (prop-add
-      (all-different [:espadrilles :flats :pumps :sandals])
-      (all-different [:foot-farm :heels-handcart :shoe-palace :tootsies])
-      (=== :flats :heels-handcart)
-      (not=== (+ 1 :pumps) :tootsies)
-      (=== :foot-farm 2)
-      (=== (+ 2 :shoe-palace) :sandals)))
-
-
-
-#_(defn prob1 []
-  (let [d {:x #{1 2} :y #{2 3}}
-        p #{(prop= 4 (prop+ :x :y))}]
-    (solve-constraints (make-CSP d p))))
-
+  (add-all-props [(all-different [:espadrilles :flats :pumps :sandals])
+                  (all-different [:foot-farm :heels-handcart :shoe-palace :tootsies])
+                  (=== :flats :heels-handcart)
+                  (not=== (+ 1 :pumps) :tootsies)
+                  (=== :foot-farm 2)
+                  (=== (+ 2 :shoe-palace) :sandals)]))
 
 (def d1 {:x #{1 2} :y #{2 3}})
 (def d2 {:x 4 :y #{5 3}})
 
+(defn prob1 []
+  (solve (make-CSP d1 (add-all-props [(=== :x :y)]))))
+
 (defn prob2 []
   (let [d {:x #{1 2 3} :y #{1 2 3}}
-        p #{(=== :x 1)}]
+        p (add-all-props [(=== :x :y)])]
     (solve (make-CSP d p))))
 
 
