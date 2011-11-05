@@ -97,7 +97,7 @@
   ([ps]
     (add-all-props (make-prop-set) ps))
   ([propset ps]
-    (reduce add-propagator propset ps)))                          
+    (reduce add-propagator propset (flatten ps))))                          
 
 ; Is the type a ground (fully-assigned) type?
 (defmulti ground? class)
@@ -127,10 +127,7 @@ or if the propagators have been exhausted."
 (defmulti remove-val (fn [d _] (class d)))
 (defmethod remove-val clojure.lang.PersistentHashSet
   [d i]
-  (let [new-d (disj d i)]
-    (if (= 1 (count new-d))
-      (first new-d)
-      new-d)))
+  (disj d i))
 
 (defn split-constraints
   "Returns a seq of smaller CSPs. This version does a simple split by finding
@@ -187,6 +184,32 @@ valid domain assignments."
 (defn fail-result []
   "Propagation function that results in failure."
   [nil :subsumed []])
+
+(defmulti reduce-single class)
+(defmethod reduce-single :default [vs] vs)
+(defmethod reduce-single clojure.lang.PersistentHashSet
+  [vs]
+  (if (= 1 (count vs))
+    (first vs)
+    vs))
+
+(defn reduction-prop
+  "Creates a propagator for a variable that notices when only
+   one element is present in the value set and assigns the
+   variable."
+  [v]
+  (create-prop
+    (fn [dom]
+      (let [dv (dom v)]
+        (if (ground? dv)
+          (subsumed-result dom)
+          (let [rv (reduce-single dv)]
+            (if (ground? rv)
+              [(assoc dom v rv) :subsumed [[v :assigned]]]
+              (fixed-result dom))))))
+    0
+    [[v :modified]]))
+
 
 ; Used by multimethods to choose propagator implementations
 (defn var-type
@@ -317,11 +340,25 @@ valid domain assignments."
 
 ;;;;;;;;
 
+(defn add-default-props
+  "Add in default propagators to reduce singleton values to an assigned value."
+  [{:keys [dom propset]}]
+  (make-CSP dom (add-all-props propset
+                               (map reduction-prop (keys dom)))))
+
+;;;;;;;;
+
 (def p1 (=== :x :y))
 (def pp (:f p1))
 
 
 ;;;;;;;;
+
+
+(defn solve-csp
+  [d ps]
+  (solve (add-default-props (make-CSP d (add-all-props ps)))))
+
 
 (def order #{1 2 3 4})
 (def arch-domain (zipmap [:espadrilles :flats :pumps :sandals
@@ -340,16 +377,26 @@ valid domain assignments."
 (def d3 {:x #{1 2 3} :y #{1 2 3}})
 
 (defn prob1 []
-  (solve (make-CSP d1 (add-all-props [(=== :x :y)]))))
+  (solve-csp d1 [(=== :x :y)]))
 
 (defn prob2 []
-  (solve (make-CSP d3 (add-all-props [(=== :x :y)]))))
+  (solve-csp d3 [(=== :x :y)]))
 
 (defn prob3 []
-  (solve (make-CSP d3 (add-all-props [(not=== :x :y) (not=== 2 :y)]))))
+  (solve-csp d3 [(not=== :x :y) (not=== 2 :y)]))
 
 (defn prob4 []
+  (solve-csp {:x #{1 2}} []))
+
+(defn prob5 []
   (solve (make-CSP {:x #{1 2}} empty-prop-set)))
+
+(defn prob6 []
+  (solve-csp {:x #{1 2 3} :y #{1 2 3} :z #{1 2 3}}
+             [(not=== :x :y)
+              (not=== :y :z)
+              (not=== :x :z)]))
+
 
 
 
