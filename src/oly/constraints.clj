@@ -338,6 +338,23 @@ valid domain assignments."
   [g v]
   (not=== v g))
 
+;;; All-different
+;;; Initially will use braindead approach of adding (not=== a b)
+;;; propagators for all a and b in the given list
+
+(defn unordered-pairs
+  [es]
+  (when (seq es)
+    (let [[x & xs] es]
+      (concat (map (partial vector x) xs)
+              (pairs xs)))))
+
+(defn all-different
+  "Braindead all-different implementation, adds (not=== a b)
+   propagators for all pairs in the list"
+  [xs]
+  (map #(apply not=== %) (unordered-pairs xs)))
+
 ;;;;;;;;
 
 (defn add-default-props
@@ -364,13 +381,13 @@ valid domain assignments."
 (def arch-domain (zipmap [:espadrilles :flats :pumps :sandals
                           :foot-farm :heels-handcart :shoe-palace :tootsies]
 		(repeat order)))
-#_(def arch-prop
-  (add-all-props [(all-different [:espadrilles :flats :pumps :sandals])
-                  (all-different [:foot-farm :heels-handcart :shoe-palace :tootsies])
-                  (=== :flats :heels-handcart)
-                  (not=== (+ 1 :pumps) :tootsies)
-                  (=== :foot-farm 2)
-                  (=== (+ 2 :shoe-palace) :sandals)]))
+(def arch-prop
+  [(all-different [:espadrilles :flats :pumps :sandals])
+   (all-different [:foot-farm :heels-handcart :shoe-palace :tootsies])
+   (=== :flats :heels-handcart)
+   #_(not=== (+ 1 :pumps) :tootsies)
+   (=== :foot-farm 2)
+   #_(=== (+ 2 :shoe-palace) :sandals)])
 
 (def d1 {:x #{1 2} :y #{2 3}})
 (def d2 {:x 4 :y #{5 3}})
@@ -397,6 +414,17 @@ valid domain assignments."
               (not=== :y :z)
               (not=== :x :z)]))
 
+(defn prob7 []
+  (solve-csp {:x #{1 2 3} :y #{1 2 3} :z #{1 2 3}}
+             [(all-different [:x :y :z])]))
 
+(defn prob8 []
+  (solve-csp {:x #{1 2} :y #{2 3} :z #{3 4} :a #{4 5} :b #{5 6} :c #{6 7}}
+             [(all-different [:x :y :z :a :b :c])]))
+
+(defn prob9 []
+  (solve-csp {:x #{1 2} :y #{2 3} :z #{3 4} :a #{4 5} :b #{5 6} :c #{6 7}}
+             [(all-different [:x :y :z :a :b :c])
+              (not=== :c 7)]))
 
 
