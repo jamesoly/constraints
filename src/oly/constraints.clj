@@ -355,6 +355,61 @@ valid domain assignments."
   [xs]
   (map #(apply not=== %) (unordered-pairs xs)))
 
+
+;;;;; <==
+
+(defmulti <== (fn [a b] [(var-type a) (var-type b)]))
+(defmulti >== (fn [a b] [(var-type a) (var-type b)]))
+
+(defmethod <== [:var :ground]
+  [v g]
+  (create-prop
+    (fn [dom]
+      (let [dv (dom v)]
+        (cond
+          (and (ground? dv) (> dv g)) (fail-result)
+          (ground? dv) (subsumed-result dom)
+          :else [(assoc dom v (into #{} (remove (partial <= g) dv)))
+                 :fix
+                 [[v :modified]]])))
+    1
+    [[v :modified]]))
+
+(defmethod <== [:ground :var]
+  [g v]
+  (>== v g))
+
+(defmethod <== [:var :var]
+  [a b]
+  (create-prop
+    (fn [dom]
+      (let [da (dom a)
+            db (dom b)]
+        ())))) ;;;; FIXME!!!
+
+(defmethod >== [:var :ground]
+  [v g]
+  (create-prop
+    (fn [dom]
+      (let [dv (dom v)]
+        (cond
+          (and (ground? dv) (< dv g)) (fail-result)
+          (ground? dv) (subsumed-result dom)
+          :else [(assoc dom v (into #{} (remove (partial >= g) dv)))
+                 :fix
+                 [[v :modified]]])))
+    1
+    [[v :modified]]))
+
+(defmethod >== [:ground :var]
+  [g v]
+  (<== v g))
+
+(defmethod >== [:var :var]
+  [a b]
+  (<== b a)) 
+
+
 ;;;;;;;;
 
 (defn add-default-props
